@@ -189,6 +189,42 @@ namespace Client.Models
                 TitleNameLabel.IsVisible = FilterSet.show;
             }
         }
+        /// <summary>
+        /// 判断物品在地图上的显示名色是否为"白色"。
+        /// 判定规则与本类构造函数中的着色逻辑保持完全一致：
+        ///   普通品质 + 无附加属性 + 非碎片  → 白色 (Gainsboro)
+        ///   普通品质 + 有附加属性          → 天蓝 (LightSkyBlue)  ← 非白
+        ///   普通品质 + 碎片                → 暗灰 (DarkGray)      ← 非白
+        ///   高级 / 稀世品质               → 绿 / 紫              ← 非白
+        /// </summary>
+        /// <remarks>
+        /// ⚠️ 本方法必须与 <c>ItemObject.cs:51-128</c>（构造函数中的 switch(itemInfo.Rarity) 着色分支）保持同源。
+        ///
+        /// 该着色分支的实际条件是 <c>Item.AddedStats.Values.Count > 0 &amp;&amp; Item.Info.Effect != ItemEffect.ItemPart</c>
+        /// （三处：54 / 72 / 100 行），本方法将其拆成两条独立的 return false，结论等价但更易读：
+        ///   - 碎片（无论有无附加属性）→ 非白（源码中分别为 DarkGray / DarkSeaGreen / MediumOrchid）
+        ///   - 有附加属性且非碎片      → 非白（源码中分别为 LightSkyBlue / Lime / Magenta）
+        ///   - 其余（普通品质、无附加属性、非碎片）→ 白 (Gainsboro)
+        ///
+        /// 改动其中任一处时，必须同步修改另一处，否则会出现
+        /// 「看着是蓝的却没拾」或「看着是白的却拾了」的偏差。
+        /// </remarks>
+        public static bool IsWhiteItem(ClientUserItem item)
+        {
+            if (item?.Info == null) return false;
+
+            // 碎片有专属名色（暗灰/灰绿/粉紫），一律视为非白
+            if (item.Info.Effect == ItemEffect.ItemPart) return false;
+
+            // 带附加属性时名色会变化（天蓝/亮绿/紫红），一律视为非白
+            // 注意：此处用 Values.Count（条目数），与构造函数着色判断保持一致
+            // （不要改用 Stats.Count —— 那是绝对值求和，见 Library/Stat.cs:17）
+            if (item.AddedStats?.Values != null && item.AddedStats.Values.Count > 0) return false;
+
+            // 其余情况只有普通品质才是白色
+            return item.Info.Rarity == Rarity.Common;
+        }
+
         public void UpdateLibraries()
         {
             Frames = FrameSet.DefaultItem;

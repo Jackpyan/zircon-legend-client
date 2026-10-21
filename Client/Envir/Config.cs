@@ -225,6 +225,12 @@ namespace Client.Envir
         public static bool 好友改颜色 { get; set; } = false;
         public static bool 快速自动拾取 { get; set; } = false;
 
+        /// <summary>
+        /// 是否自动拾取地图上「非白色」品质标签的物品。
+        /// 判定规则见 Client/Models/ItemObject.cs 的 IsWhiteItem()。
+        /// </summary>
+        public static bool 拾取非白色物品 { get; set; } = false;
+
         public static bool Tab捡取 { get; set; } = false;
         public static bool 自动学习技能书 { get; set; } = false;
 

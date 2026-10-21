@@ -911,6 +911,28 @@ namespace Client.Scenes.Views
 
             return false;
         }
+
+        /// <summary>
+        /// 判断物品是否应被「拾取非白色物品」开关纳入拾取。
+        /// 金币/经验等货币类物品不在此列（按决策点 7，继续走白名单机制控制）。
+        /// </summary>
+        private static bool IsPickableByColor(ItemObject itemObject)
+        {
+            var item = itemObject?.Item;
+            if (item?.Info == null) return false;
+
+            // 货币类（金币、经验）不参与品质拾取
+            if (item.Info.Effect == ItemEffect.Gold || item.Info.Effect == ItemEffect.Experience)
+            {
+                return false;
+            }
+
+            // 白色 → 不拾
+            if (ItemObject.IsWhiteItem(item)) return false;
+
+            // 非白色 → 拾
+            return true;
+        }
         public bool PickupItems()
         {
             AutoPick?.SycFilters(false);
@@ -995,6 +1017,17 @@ namespace Client.Scenes.Views
                                                                 });
                                                                 flag = true;
                                                             }
+                                                        }
+                                                        // 新增：按颜色品质拾取（独立于白名单，仅角色拾取）
+                                                        else if (Config.拾取非白色物品 && IsPickableByColor(itemObject))
+                                                        {
+                                                            user_items.Add(new PickItemInfo()
+                                                            {
+                                                                ItemIndex = itemObject.Item.Info.Index,
+                                                                xPos = index3,
+                                                                yPos = index2
+                                                            });
+                                                            flag = true;
                                                         }
     
                                                     }
@@ -3791,6 +3824,9 @@ namespace Client.Scenes.Views
             public int idx { get; set; }
             public string name {  get; set; }
             public ItemType type { get; set; }
+            public Rarity rarity { get; set; }        // 用于列表着色与批量勾选
+            public bool hasPart { get; set; }         // 是否为碎片类物品
+            public bool canHaveStats { get; set; }    // 该类型是否可能出现随机附加属性
             public bool hint;
             public bool pick;
             public bool picks { get; set; }
@@ -3860,6 +3896,16 @@ namespace Client.Scenes.Views
                         name = itemInfo.ItemName,
                         idx = itemInfo.Index,
                         type = itemInfo.ItemType,
+                        rarity = itemInfo.Rarity,
+                        hasPart = itemInfo.Effect == ItemEffect.ItemPart,
+                        canHaveStats = itemInfo.ItemType == ItemType.Weapon
+                                    || itemInfo.ItemType == ItemType.Armour
+                                    || itemInfo.ItemType == ItemType.Helmet
+                                    || itemInfo.ItemType == ItemType.Necklace
+                                    || itemInfo.ItemType == ItemType.Bracelet
+                                    || itemInfo.ItemType == ItemType.Ring
+                                    || itemInfo.ItemType == ItemType.Shoes
+                                    || itemInfo.ItemType == ItemType.Shield,
                     };
 
                     Items.Add(tmp);
@@ -3945,6 +3991,8 @@ namespace Client.Scenes.Views
             public DXButton DelButton;
             public CItemFilter ItemFilter { get; set; }
             public DXListView ItemView { get; set; }
+            public DXCheckBox ChkNonWhite;
+            public DXButton BtnSelectNonWhite;
 
             public bool NeedSycFilters { get; set; } = true;
 
@@ -4047,6 +4095,42 @@ namespace Client.Scenes.Views
                 dxButton3.Location = new Point(x4, y4);
                 DelButton = dxButton3;
                 DelButton.MouseClick += (EventHandler<MouseEventArgs>)((o, e) => ItemView.RemoveAll());
+
+                // 「拾取非白色物品」开关
+                DXCheckBox dxCheckBox14 = new DXCheckBox
+                {
+                    Label = { Text = "拾取非白色物品" },
+                    Parent = this,
+                    Checked = Config.拾取非白色物品,
+                    Size = new Size(120, 18),
+                    Location = new Point(10, 26),      // 搜索行下方独立一行
+                };
+                dxCheckBox14.CheckedChanged += (o, e) =>
+                {
+                    Config.拾取非白色物品 = dxCheckBox14.Checked;
+                };
+                ChkNonWhite = dxCheckBox14;
+
+                // 「勾选非白」按钮
+                DXButton dxButton4 = new DXButton
+                {
+                    Parent = this,
+                    Size = new Size(80, 18),
+                    Label = { Text = "勾选非白" },
+                    ButtonType = ButtonType.SmallButton,
+                    Location = new Point(200, 26),
+                };
+                dxButton4.MouseClick += (EventHandler<MouseEventArgs>)((o, e) =>
+                {
+                    // 勾选全部高级/稀世品质物品（不限当前筛选类型）
+                    foreach (CItemFilterSet set in ItemFilter.Items)
+                    {
+                        if (set.rarity == Rarity.Common) continue;   // 只勾非普通品质
+                        set.pick = true;                              // 角色拾取
+                    }
+                    RefreshItems(CombTypeBox.SelectedItem as ItemType?);   // 刷新勾选状态显示
+                });
+                BtnSelectNonWhite = dxButton4;
                 DXListView dxListView = new DXListView();
                 dxListView.Parent = this;
                 dxListView.Size = new Size(410, 405);
@@ -4206,6 +4290,40 @@ namespace Client.Scenes.Views
                     if (citemFilterSet.name != null && citemFilterSet.name.Length != 0)
                     {
                         uint nItem = ItemView.InsertItem(uint.MaxValue, citemFilterSet.name);
+                        // 按品质给物品名着色，尽量贴近地面上可能出现的名色
+                        if (ItemView.GetItem(nItem, 0) is DXLabel nameLabel)
+                        {
+                            // 碎片：地面恒为 暗灰 / 灰绿 / 粉紫 三档之一
+                            if (citemFilterSet.hasPart)
+                            {
+                                switch (citemFilterSet.rarity)
+                                {
+                                    case Rarity.Common:   nameLabel.ForeColour = Color.DarkGray;      break;  // 暗灰
+                                    case Rarity.Superior: nameLabel.ForeColour = Color.DarkSeaGreen;  break;  // 灰绿
+                                    case Rarity.Elite:    nameLabel.ForeColour = Color.MediumOrchid; break;  // 粉紫
+                                }
+                            }
+                            // 可能带随机属性：取该品质「带属性」时的醒目色
+                            else if (citemFilterSet.canHaveStats)
+                            {
+                                switch (citemFilterSet.rarity)
+                                {
+                                    case Rarity.Common:   nameLabel.ForeColour = Color.LightSkyBlue; break;  // 天蓝
+                                    case Rarity.Superior: nameLabel.ForeColour = Color.Lime;          break;  // 亮绿
+                                    case Rarity.Elite:    nameLabel.ForeColour = Color.Magenta;      break;  // 紫红
+                                }
+                            }
+                            // 普通品质 + 无附加属性 + 非碎片 → 地面恒为白
+                            else
+                            {
+                                switch (citemFilterSet.rarity)
+                                {
+                                    case Rarity.Common:   nameLabel.ForeColour = Color.Gainsboro; break;  // 白
+                                    case Rarity.Superior: nameLabel.ForeColour = Color.LightGreen; break;  // 亮浅绿
+                                    case Rarity.Elite:    nameLabel.ForeColour = Color.Violet;     break;  // 亮浅紫
+                                }
+                            }
+                        }
                         DXCheckBox dxCheckBox1 = new DXCheckBox();
                         dxCheckBox1.AutoSize = false;
                         dxCheckBox1.Checked = citemFilterSet.hint;
@@ -4310,7 +4428,9 @@ namespace Client.Scenes.Views
                 Size size1 = Search.Size;
                 int height1 = size1.Height;
                 int y2 = y1 + height1;
-                Point point = new Point(x, y2);
+                // 下方新增「拾取非白色物品」复选框 + 「勾选非白」按钮所在行，让出 23px
+                int y3 = y2 + 23;
+                Point point = new Point(x, y3);
                 itemView1.Location = point;
                 DXListView itemView2 = ItemView;
                 size1 = Size;
